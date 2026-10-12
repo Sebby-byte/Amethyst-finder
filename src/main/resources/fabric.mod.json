@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "amethystfinder",
+  "version": "${version}",
+  "name": "Amethyst Finder",
+  "description": "Highlights amethyst buds and clusters near you, by minimum growth stage and range. Client side.",
+  "authors": ["You"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.example.amethystfinder.AmethystFinderClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.1",
+    "minecraft": "~26.3",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
