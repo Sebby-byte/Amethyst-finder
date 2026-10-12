@@ -6,6 +6,8 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
@@ -70,17 +72,66 @@ public class AmethystFinderClient implements ClientModInitializer {
     // saved settings
     private static int minStage = 3;          // 0 = small bud ... 3 = fully grown cluster
     private static int range = DEFAULT_RANGE; // blocks
-    private static boolean seeThrough = true; // draw outlines through solid blocks
+    private static boolean seeThrough = false; // draw outlines through solid blocks
 
     private static boolean enabled = false;
     private static KeyMapping toggleKey;
     private static KeyMapping settingsKey;
-    /** Same as the vanilla line pipeline, but with the depth test removed so outlines show through walls. */
-    private static final RenderPipeline LINES_THROUGH_WALLS = RenderPipelines.register(
-            RenderPipeline.builder(RenderPipelines.LINES_SNIPPET)
-                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/lines_through_walls"))
-                    .withDepthStencilState(Optional.empty())
-                    .build());
+    /**
+     * Same as the vanilla line pipeline, but with the depth test removed so outlines show through walls.
+     * Minecraft 26.3 changed these render classes a lot, so the parts that changed (depth state and the
+     * color target) are set through reflection. If anything does not fit, this is null and the mod simply
+     * falls back to normal (depth-tested) outlines instead of crashing.
+     */
+    private static final RenderPipeline LINES_THROUGH_WALLS = buildThroughWallsPipeline();
+
+    private static RenderPipeline buildThroughWallsPipeline() {
+        try {
+            Object b = RenderPipeline.builder(RenderPipelines.LINES_SNIPPET)
+                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/lines_through_walls"));
+
+            // 1) No depth test: withDepthStencilState(Optional.empty()) or (null), whichever this version has.
+            Method depth = null;
+            boolean optionalParam = false;
+            for (Method m : b.getClass().getMethods()) {
+                if (!m.getName().equals("withDepthStencilState") || m.getParameterCount() != 1) continue;
+                if (m.getParameterTypes()[0] == Optional.class) { depth = m; optionalParam = true; break; }
+                depth = m;
+            }
+            if (depth == null) throw new IllegalStateException("withDepthStencilState not found");
+            depth.setAccessible(true);
+            Object r = depth.invoke(b, optionalParam ? Optional.empty() : null);
+            if (r != null && r.getClass() == b.getClass()) b = r;
+
+            // 2) A color target with normal translucent blending (the vanilla line pipeline adds this itself).
+            Method color = null;
+            for (Method m : b.getClass().getMethods()) {
+                if (m.getName().equals("withColorTargetState") && m.getParameterCount() == 1) { color = m; break; }
+            }
+            if (color != null) {
+                Class<?> ctsClass = color.getParameterTypes()[0];
+                Object cts = null;
+                for (Constructor<?> c : ctsClass.getConstructors()) {
+                    if (c.getParameterCount() != 1) continue;
+                    Class<?> blendClass = c.getParameterTypes()[0];
+                    Object translucent = blendClass.getField("TRANSLUCENT").get(null);
+                    cts = c.newInstance(translucent);
+                    break;
+                }
+                if (cts == null) throw new IllegalStateException("could not create ColorTargetState");
+                color.setAccessible(true);
+                r = color.invoke(b, cts);
+                if (r != null && r.getClass() == b.getClass()) b = r;
+            }
+
+            Method build = b.getClass().getMethod("build");
+            build.setAccessible(true);
+            return RenderPipelines.register((RenderPipeline) build.invoke(b));
+        } catch (Throwable t) {
+            System.err.println("[Amethyst Finder] See-through pipeline unavailable, using normal outlines: " + t);
+            return null;
+        }
+    }
 
     private static RenderType linesType;
     private static RenderType linesThroughWallsType;
@@ -224,10 +275,12 @@ public class AmethystFinderClient implements ClientModInitializer {
         if (linesType == null) {
             linesType = RenderType.create("amethystfinder_lines",
                     RenderSetup.builder(RenderPipelines.LINES).createRenderSetup());
-            linesThroughWallsType = RenderType.create("amethystfinder_lines_through_walls",
-                    RenderSetup.builder(LINES_THROUGH_WALLS).createRenderSetup());
+            if (LINES_THROUGH_WALLS != null) {
+                linesThroughWallsType = RenderType.create("amethystfinder_lines_through_walls",
+                        RenderSetup.builder(LINES_THROUGH_WALLS).createRenderSetup());
+            }
         }
-        RenderType type = seeThrough ? linesThroughWallsType : linesType;
+        RenderType type = (seeThrough && linesThroughWallsType != null) ? linesThroughWallsType : linesType;
 
         Vec3 cam = mc.gameRenderer.mainCamera().position();
         pose.pushPose();
@@ -266,7 +319,7 @@ public class AmethystFinderClient implements ClientModInitializer {
         } catch (NumberFormatException e) {
             range = DEFAULT_RANGE;
         }
-        seeThrough = Boolean.parseBoolean(props.getProperty("seeThrough", "true"));
+        seeThrough = Boolean.parseBoolean(props.getProperty("seeThroughOutline", "false"));
         if (!Files.exists(path)) saveConfig();
     }
 
@@ -274,10 +327,10 @@ public class AmethystFinderClient implements ClientModInitializer {
         Properties props = new Properties();
         props.setProperty("minStage", Integer.toString(minStage));
         props.setProperty("range", Integer.toString(range));
-        props.setProperty("seeThrough", Boolean.toString(seeThrough));
+        props.setProperty("seeThroughOutline", Boolean.toString(seeThrough));
         try (OutputStream out = Files.newOutputStream(configPath())) {
             props.store(out, "Amethyst Finder. minStage: 0=small bud, 1=medium bud, 2=large bud, 3=cluster. "
-                    + "range: " + MIN_RANGE + "-" + MAX_RANGE + " blocks. seeThrough: true/false.");
+                    + "range: " + MIN_RANGE + "-" + MAX_RANGE + " blocks. seeThroughOutline: true/false.");
         } catch (IOException ignored) {
         }
     }
