@@ -7,8 +7,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Properties;
 
+import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.PoseStack;
 
@@ -43,7 +45,7 @@ import net.fabricmc.loader.api.FabricLoader;
  * Client-side highlighter for amethyst buds and clusters.
  *
  * You choose the minimum growth stage to detect (small bud, medium bud, large bud, or fully grown cluster)
- * and a range. Everything at that stage or larger within range is outlined. It only looks at blocks your
+ * and a range. Everything at that stage or larger within range is outlined, optionally through walls. It only looks at blocks your
  * client already has loaded, and nothing is sent to the server.
  *
  * G toggles, J opens the settings screen. It starts OFF every launch.
@@ -68,11 +70,20 @@ public class AmethystFinderClient implements ClientModInitializer {
     // saved settings
     private static int minStage = 3;          // 0 = small bud ... 3 = fully grown cluster
     private static int range = DEFAULT_RANGE; // blocks
+    private static boolean seeThrough = true; // draw outlines through solid blocks
 
     private static boolean enabled = false;
     private static KeyMapping toggleKey;
     private static KeyMapping settingsKey;
+    /** Same as the vanilla line pipeline, but with the depth test removed so outlines show through walls. */
+    private static final RenderPipeline LINES_THROUGH_WALLS = RenderPipelines.register(
+            RenderPipeline.builder(RenderPipelines.LINES_SNIPPET)
+                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/lines_through_walls"))
+                    .withDepthStencilState(Optional.empty())
+                    .build());
+
     private static RenderType linesType;
+    private static RenderType linesThroughWallsType;
 
     private static int tickCounter = 0;
     private static volatile List<Found> results = new ArrayList<>();
@@ -82,6 +93,8 @@ public class AmethystFinderClient implements ClientModInitializer {
     public static boolean isEnabled() { return enabled; }
     public static int getMinStage() { return minStage; }
     public static int getRange() { return range; }
+    public static boolean isSeeThrough() { return seeThrough; }
+    public static void setSeeThrough(boolean v) { seeThrough = v; }
 
     public static void setMinStage(int stage) {
         minStage = Mth.clamp(stage, 0, 3);
@@ -211,14 +224,17 @@ public class AmethystFinderClient implements ClientModInitializer {
         if (linesType == null) {
             linesType = RenderType.create("amethystfinder_lines",
                     RenderSetup.builder(RenderPipelines.LINES).createRenderSetup());
+            linesThroughWallsType = RenderType.create("amethystfinder_lines_through_walls",
+                    RenderSetup.builder(LINES_THROUGH_WALLS).createRenderSetup());
         }
+        RenderType type = seeThrough ? linesThroughWallsType : linesType;
 
         Vec3 cam = mc.gameRenderer.mainCamera().position();
         pose.pushPose();
         pose.translate(-cam.x, -cam.y, -cam.z);
         for (Found f : list) {
             AABB box = new AABB(f.pos()).inflate(0.002);
-            collector.submitShapeOutline(pose, Shapes.create(box), linesType,
+            collector.submitShapeOutline(pose, Shapes.create(box), type,
                     STAGE_COLORS[f.stage()], LINE_WIDTH, false);
         }
         pose.popPose();
@@ -250,6 +266,7 @@ public class AmethystFinderClient implements ClientModInitializer {
         } catch (NumberFormatException e) {
             range = DEFAULT_RANGE;
         }
+        seeThrough = Boolean.parseBoolean(props.getProperty("seeThrough", "true"));
         if (!Files.exists(path)) saveConfig();
     }
 
@@ -257,9 +274,10 @@ public class AmethystFinderClient implements ClientModInitializer {
         Properties props = new Properties();
         props.setProperty("minStage", Integer.toString(minStage));
         props.setProperty("range", Integer.toString(range));
+        props.setProperty("seeThrough", Boolean.toString(seeThrough));
         try (OutputStream out = Files.newOutputStream(configPath())) {
             props.store(out, "Amethyst Finder. minStage: 0=small bud, 1=medium bud, 2=large bud, 3=cluster. "
-                    + "range: " + MIN_RANGE + "-" + MAX_RANGE + " blocks.");
+                    + "range: " + MIN_RANGE + "-" + MAX_RANGE + " blocks. seeThrough: true/false.");
         } catch (IOException ignored) {
         }
     }

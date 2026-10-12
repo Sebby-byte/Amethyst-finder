@@ -10,6 +10,7 @@ import net.minecraft.network.chat.Component;
 public class AmethystFinderSettingsScreen extends Screen {
     private Button enableButton;
     private Button stageButton;
+    private Button seeThroughButton;
 
     public AmethystFinderSettingsScreen() {
         super(Component.literal("Amethyst Finder Settings"));
@@ -33,12 +34,21 @@ public class AmethystFinderSettingsScreen extends Screen {
 
         this.addRenderableWidget(new RangeSlider(x, y + 52, w, 20));
 
+        seeThroughButton = this.addRenderableWidget(Button.builder(seeThroughLabel(), b -> {
+            AmethystFinderClient.setSeeThrough(!AmethystFinderClient.isSeeThrough());
+            seeThroughButton.setMessage(seeThroughLabel());
+        }).bounds(x, y + 78, w, 20).build());
+
         this.addRenderableWidget(Button.builder(Component.literal("Done"), b -> this.onClose())
-                .bounds(x, y + 86, w, 20).build());
+                .bounds(x, y + 112, w, 20).build());
     }
 
     private static Component enableLabel() {
         return Component.literal("Amethyst Finder: " + (AmethystFinderClient.isEnabled() ? "ON" : "OFF"));
+    }
+
+    private static Component seeThroughLabel() {
+        return Component.literal("See through blocks: " + (AmethystFinderClient.isSeeThrough() ? "ON" : "OFF"));
     }
 
     private static Component stageLabel() {
