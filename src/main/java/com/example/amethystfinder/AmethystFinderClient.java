@@ -63,7 +63,7 @@ public class AmethystFinderClient implements ClientModInitializer {
     };
 
     public static final int MIN_RANGE = 4;
-    public static final int MAX_RANGE = 64;
+    public static final int MAX_RANGE = 128;
     private static final int DEFAULT_RANGE = 24;
     private static final int RESCAN_TICKS = 10;
     private static final int MAX_RESULTS = 2000;
